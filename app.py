@@ -11,22 +11,14 @@ from datetime import datetime, timedelta
 # ─────────────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Global Portfolio Optimizer", page_icon="📊", layout="wide")
 
-# Custom CSS รองรับการแสดงผลบนมือถือและ Desktop
-st.markdown("""
-<style>
-    .reportview-container .main .block-container { max-width: 1200px; padding: 2rem; }
-    .stMetric { background-color: #f0f2f6; padding: 10px; border-radius: 10px; }
-</style>
-""", unsafe_allow_html=True)
-
 # พจนานุกรมสำหรับระบบ 2 ภาษา
 LANG_DICT = {
     "ไทย": {
         "title": "📊 ระบบจัดพอร์ตการลงทุนระดับโลก (Global Markowitz Model)",
-        "subtitle": "ดึงข้อมูลหุ้นทุกตัวในโลกที่คนธรรมดาซื้อได้ผ่าน Yahoo Finance API",
+        "subtitle": "ค้นหาหุ้นได้ทุกตัวในโลกที่ IPO แล้วผ่านระบบแนะนำหุ้นอัจฉริยะ (Yahoo Finance API)",
         "sidebar_header": "⚙️ ตั้งค่าพอร์ตฟอลิโอ",
-        "ticker_label": "พิมพ์ชื่อย่อหุ้นที่ต้องการ (คั่นด้วยเครื่องหมายคอมมา ,)",
-        "ticker_help": "ตัวอย่างการพิมพ์: หุ้นอเมริกา (AAPL, MSFT, TSMC -> TSM, ASML), หุ้นไทย (PTT.BK, CPALL.BK), หุ้นญี่ปุ่น (7203.T), หุ้นสิงคโปร์ (D05.SI)",
+        "ticker_label": "พิมพ์หรือเลือกชื่อหุ้น (พิมพ์เสร็จกด Enter เพื่อเพิ่มหุ้นนอกรายการได้)",
+        "ticker_help": "พิมพ์เพื่อดูรายชื่อแนะนำ หรือหากต้องการเพิ่มหุ้นนอกเหนือจากรายการ ให้พิมพ์ชื่อย่อหุ้นตัวนั้นตรงๆ แล้วกดปุ่ม Enter บนคีย์บอร์ดได้เลย เช่น TSM, ASML, PTT.BK",
         "date_label": "ช่วงเวลาข้อมูลย้อนหลัง",
         "rf_label": "อัตราผลตอบแทนปราศจากความเสี่ยง (%)",
         "btn_run": "🚀 เริ่มคำนวณพอร์ตฟอลิโอ",
@@ -40,15 +32,15 @@ LANG_DICT = {
         "min_var": "พอร์ตความเสี่ยงต่ำสุด (Min Variance)",
         "asset": "ชื่อหุ้น / สินทรัพย์",
         "weight_pct": "สัดส่วนที่ควรลงทุน (%)",
-        "err_min": "⚠️ กรุณาพิมพ์ระบุชื่อหุ้นอย่างน้อย 2 ตัวขึ้นไปเพื่อคำนวณจัดพอร์ต",
-        "err_fetch": "❌ เกิดข้อผิดพลาด: ไม่สามารถดึงข้อมูลหุ้นบางตัวได้ กรุณาตรวจสอบว่าพิมพ์ตัวย่อหุ้น (Ticker) ถูกต้องตามหลัก Yahoo Finance หรือไม่ หรือหุ้นตัวนั้นอาจไม่มีข้อมูลในช่วงเวลาที่เลือก"
+        "err_min": "⚠️ กรุณาเลือกหรือพิมพ์ชื่อหุ้นอย่างน้อย 2 ตัวขึ้นไปเพื่อคำนวณจัดพอร์ต",
+        "err_fetch": "❌ เกิดข้อผิดพลาด: ไม่สามารถดึงข้อมูลหุ้นบางตัวได้ กรุณาตรวจสอบว่าพิมพ์ตัวย่อหุ้น (Ticker) ถูกต้องตามหลัก Yahoo Finance หรือไม่ หรือช่วงเวลาที่เลือกไม่มีการซื้อขาย"
     },
     "English": {
         "title": "📊 Global Portfolio Optimization",
-        "subtitle": "Access any IPO'd stock worldwide via Yahoo Finance API",
+        "subtitle": "Access any IPO'd stock worldwide with smart autocomplete & custom token entries.",
         "sidebar_header": "⚙️ Configuration",
-        "ticker_label": "Enter Stock Tickers (separated by commas ,)",
-        "ticker_help": "Examples: US (AAPL, TSM, ASML), Thailand (PTT.BK), Japan (7203.T), Crypto (BTC-USD)",
+        "ticker_label": "Search or Type Tickers (Press Enter to add custom symbols)",
+        "ticker_help": "Type to filter popular list, or type any valid global ticker and press Enter to insert.",
         "date_label": "Historical Date Range",
         "rf_label": "Risk-Free Rate (%)",
         "btn_run": "🚀 Run Optimization",
@@ -62,13 +54,22 @@ LANG_DICT = {
         "min_var": "Minimum Variance Portfolio",
         "asset": "Asset Ticker",
         "weight_pct": "Optimal Weight (%)",
-        "err_min": "⚠️ Please enter at least 2 tickers for optimization.",
+        "err_min": "⚠️ Please select at least 2 tickers for optimization.",
         "err_fetch": "❌ Error fetching data. Please verify ticker symbols or date range."
     }
 }
 
+# คลังรายชื่อหุ้นยอดนิยมระดับโลกและไทย สำหรับตัวแนะนำเดาคำ (Autocomplete Base)
+if "popular_tickers" not in st.session_state:
+    st.session_state.popular_tickers = [
+        "AAPL", "MSFT", "GOOG", "NVDA", "TSLA", "AMD", "META", "AMZN", "NFLX", "AVGO", "QCOM",
+        "TSM", "ASML", "BABA", "NVO", "LLY", "V", "MA", "UNH", "JPM", "XOM", "WMT", "COST",
+        "PTT.BK", "CPALL.BK", "BDMS.BK", "SCC.BK", "AOT.BK", "KBANK.BK", "SCB.BK", "ADVANC.BK",
+        "GULF.BK", "CPN.BK", "INTUCH.BK", "BANPU.BK", "TRUE.BK", "TOP.BK", "BBL.BK", "OR.BK"
+    ]
+
 # ─────────────────────────────────────────────────────────────────────────────
-# 2. ส่วนแสดงผลแถบข้าง (Sidebar)
+# 2. ส่วนแสดงผลแถบข้าง (Sidebar) พร้อมกล่องรับหุ้นอัจฉริยะแบบ Hybrid
 # ─────────────────────────────────────────────────────────────────────────────
 with st.sidebar:
     lang = st.selectbox("Language/ภาษา", ["ไทย", "English"])
@@ -77,13 +78,29 @@ with st.sidebar:
     st.markdown("---")
     st.header(T["sidebar_header"])
     
-    # ช่องกรอกข้อมูลที่เปิดอิสระให้พิมพ์หุ้นอะไรก็ได้ในโลกที่มนุษย์ธรรมดาซื้อได้
-    tickers_input = st.text_input(
+    # ดึงค่าหุ้นที่ผู้ใช้เคยเลือกไว้ (ถ้ามี) ป้องกันค่าหายเวลากดรัน
+    if "selected_list" not in st.session_state:
+        st.session_state.selected_list = ["AAPL", "NVDA", "TSM", "ASML"]
+        
+    # ระบบพิมพ์แนะนำตัวเลือก + รองรับการกด Enter เพื่อดักจับหุ้นใหม่ที่ไม่อยู่ในรายการเข้าไปในตัวเลือกทันที
+    selected_tickers = st.multiselect(
         T["ticker_label"],
-        value="AAPL, MSFT, TSM, ASML, PTT.BK",
+        options=st.session_state.popular_tickers,
+        default=st.session_state.selected_list,
         help=T["ticker_help"]
     )
     
+    # กลไกตรวจสอบอินพุตแบบเรียลไทม์: หากผู้พิมพ์ตัวเลือกอื่นที่ไม่เคยมีในระบบ แต่อยากใช้ ให้เอามันเข้าไปบันทึกในระบบด้วย
+    # วิธีใช้ในหน้าเว็บ: พิมพ์ชื่อหุ้น เช่น ARM ลงในช่องแล้วกด Enter ตัว ARM จะถูกยัดเข้าพอร์ตทันที
+    updated = False
+    for ticker in selected_tickers:
+        if ticker not in st.session_state.popular_tickers:
+            st.session_state.popular_tickers.append(ticker)
+            updated = True
+    if updated:
+        st.session_state.selected_list = selected_tickers
+        st.rerun()
+
     st.markdown("---")
     col1, col2 = st.columns(2)
     with col1:
@@ -94,7 +111,7 @@ with st.sidebar:
     rf_rate = st.number_input(T["rf_label"], min_value=0.0, max_value=20.0, value=2.0, step=0.1) / 100
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3. ส่วนคำนวณทางคณิตศาสตร์และการเงิน
+# 3. ส่วนคำนวณทางคณิตศาสตร์และการเงิน (Financial Engine)
 # ─────────────────────────────────────────────────────────────────────────────
 def get_portfolio_stats(weights, returns_mean, returns_cov, rf_rate):
     port_return = np.sum(returns_mean * weights) * 252
@@ -109,32 +126,31 @@ def minimize_variance(weights, returns_mean, returns_cov, rf_rate):
     return get_portfolio_stats(weights, returns_mean, returns_cov, rf_rate)[1]**2
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 4. หน้าจอหลักและการประมวลผล
+# 4. หน้าจอหลักและการประมวลผล (Main UI Logic)
 # ─────────────────────────────────────────────────────────────────────────────
 st.title(T["title"])
 st.markdown(f"*{T['subtitle']}*")
 
 if st.sidebar.button(T["btn_run"]):
-    # แปลงข้อความที่ผู้ใช้กรอก แยกออกมาเป็นรายชื่อหุ้นรายตัว
-    raw_tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
+    # คัดกรองและจัดรูปแบบชื่อย่อหุ้นที่เลือก
+    clean_tickers = [t.strip().upper() for t in selected_tickers if t.strip()]
     
-    if len(raw_tickers) < 2:
+    if len(clean_tickers) < 2:
         st.error(T["err_min"])
     else:
-        with st.spinner('Fetching global market data and processing...'):
+        with st.spinner('Fetching historical data from Yahoo Finance and optimizing portfolio...'):
             try:
                 # ดึงราคาย้อนหลังจากฐานข้อมูล Yahoo Finance ทั่วโลก
-                df = yf.download(raw_tickers, start=start_date, end=end_date)['Adj Close']
+                df = yf.download(clean_tickers, start=start_date, end=end_date)['Adj Close']
                 
-                # ตรวจสอบความถูกต้องของข้อมูล
                 if df.empty:
-                    raise ValueError()
+                    raise ValueError("No data returned from API")
                 
-                # หากดึงหุ้นตัวเดียวแต่โครงสร้างข้อมูลเป็น Series ให้แปลงเป็น DataFrame
+                # รองรับกรณีที่ผู้ใช้เลือกหุ้นมา 2 ตัว แต่ใช้ได้จริงตัวเดียว หรือข้อมูลหายบางส่วน
                 if isinstance(df, pd.Series):
-                    df = df.to_frame(name=raw_tickers[0])
+                    df = df.to_frame(name=clean_tickers[0])
                 
-                # เคลียร์คอลัมน์ที่ไม่มีข้อมูลออกไป
+                # ลบคอลัมน์ที่ไม่มีข้อมูลราคาออกไปเลย
                 df = df.dropna(axis=1, how='all')
                 actual_tickers = list(df.columns)
                 
@@ -142,7 +158,7 @@ if st.sidebar.button(T["btn_run"]):
                     st.error(T["err_min"])
                     st.stop()
                 
-                # คำนวณผลตอบแทน
+                # คำนวณเปอร์เซ็นต์ผลตอบแทนรายวัน
                 returns = df.pct_change().dropna()
                 returns_mean = returns.mean()
                 returns_cov = returns.cov()
@@ -152,17 +168,17 @@ if st.sidebar.button(T["btn_run"]):
                 bounds = tuple((0, 1) for _ in range(num_assets))
                 init_guess = num_assets * [1. / num_assets]
                 
-                # คำนวณพอร์ต Max Sharpe
+                # 1. คำนวณพอร์ต Max Sharpe Ratio
                 opt_sharpe = minimize(minimize_sharpe, init_guess, args=(returns_mean, returns_cov, rf_rate), method='SLSQP', bounds=bounds, constraints=constraints)
                 w_sharpe = opt_sharpe['x']
                 ret_sh, vol_sh, sr_sh = get_portfolio_stats(w_sharpe, returns_mean, returns_cov, rf_rate)
                 
-                # คำนวณพอร์ต Min Variance
+                # 2. คำนวณพอร์ต Minimum Variance
                 opt_var = minimize(minimize_variance, init_guess, args=(returns_mean, returns_cov, rf_rate), method='SLSQP', bounds=bounds, constraints=constraints)
                 w_var = opt_var['x']
                 ret_v, vol_v, sr_v = get_portfolio_stats(w_var, returns_mean, returns_cov, rf_rate)
                 
-                # คำนวณเส้น Efficient Frontier
+                # 3. คำนวณจุดบนเส้น Efficient Frontier เพื่อวาดกราฟโค้งประเมินผล
                 target_returns = np.linspace(ret_v, returns_mean.max() * 252, 30)
                 frontier_vols = []
                 for target in target_returns:
@@ -171,7 +187,7 @@ if st.sidebar.button(T["btn_run"]):
                     res = minimize(minimize_variance, init_guess, args=(returns_mean, returns_cov, rf_rate), method='SLSQP', bounds=bounds, constraints=cons)
                     frontier_vols.append(np.sqrt(res['fun']))
 
-                # การแสดงผลผลลัพธ์
+                # แสดงผลแบ่งเป็น 3 แท็บข้อมูลหลัก
                 tab1, tab2, tab3 = st.tabs([T["tab_weights"], T["tab_frontier"], T["tab_summary"]])
                 
                 with tab1:
@@ -213,5 +229,6 @@ if st.sidebar.button(T["btn_run"]):
                     })
                     st.dataframe(weights_df, use_container_width=True)
 
-            except Exception:
+            except Exception as e:
                 st.error(T["err_fetch"])
+                st.caption(f"Debug Info: {str(e)}")
