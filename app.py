@@ -1,443 +1,216 @@
-"""
-Mean-Variance Portfolio Optimization (Markowitz Model)
-Production-ready Streamlit Web Application
-
-Run with: streamlit run app.py
-"""
-
 import streamlit as st
 import numpy as np
 import pandas as pd
 import yfinance as yf
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 from scipy.optimize import minimize
 from datetime import datetime, timedelta
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Page Configuration
+# 1. การตั้งค่าหน้าเว็บและระบบสลับภาษา (Bilingual UI Support)
 # ─────────────────────────────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="Portfolio Optimizer",
-    page_icon="📊",
-    layout="wide"
-)
+st.set_page_config(page_title="Portfolio Optimizer", page_icon="📊", layout="wide")
 
-st.title("📊 Mean-Variance Portfolio Optimization")
-st.markdown("*Markowitz Model — Efficient Frontier Analysis*")
+# Custom CSS รองรับการแสดงผลบนมือถือ (iOS/Android) และ Desktop
+st.markdown("""
+<style>
+    .reportview-container .main .block-container { max-width: 1200px; padding: 2rem; }
+    .stMetric { background-color: #f0f2f6; padding: 10px; border-radius: 10px; }
+    @media (max-width: 768px) {
+        .stPlotlyChart { width: 100% !important; }
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# พจนานุกรมสำหรับระบบ 2 ภาษา
+LANG_DICT = {
+    "ไทย": {
+        "title": "📊 ระบบจัดพอร์ตการลงทุน (Markowitz Model)",
+        "subtitle": "แบบจำลอง Mean-Variance และเส้นประสิทธิภาพ (Efficient Frontier)",
+        "sidebar_header": "⚙️ ตั้งค่าพอร์ตฟอลิโอ",
+        "lang_label": "เปลี่ยนภาษา / Language",
+        "ticker_label": "เลือกหรือพิมพ์ชื่อหุ้น (เช่น AAPL, NVDA, PTT.BK)",
+        "ticker_help": "พิมพ์ชื่อย่อหุ้นแล้วกดเลือก หรือพิมพ์ชื่อหุ้นอื่นนอกเหนือจากรายการแล้วกด Enter ได้เลย",
+        "date_label": "ช่วงเวลาข้อมูลย้อนหลัง",
+        "rf_label": "อัตราผลตอบแทนปราศจากความเสี่ยง (%)",
+        "btn_run": "🚀 เริ่มคำนวณพอร์ตฟอลิโอ",
+        "tab_weights": "🍰 สัดส่วนการลงทุน (Weights)",
+        "tab_frontier": "📈 เส้นประสิทธิภาพ Efficient Frontier",
+        "tab_summary": "📋 ตารางสรุปผลลัพธ์",
+        "metric_return": "ผลตอบแทนคาดหวังรายปี",
+        "metric_risk": "ความผันผวนรายปี (ความเสี่ยง)",
+        "metric_sharpe": "Sharpe Ratio",
+        "max_sharpe": "พอร์ต Sharpe สูงสุด (Max Sharpe)",
+        "min_var": "พอร์ตความเสี่ยงต่ำสุด (Min Variance)",
+        "asset": "ชื่อหุ้น / สินทรัพย์",
+        "weight_pct": "สัดส่วนที่ควรลงทุน (%)",
+        "err_min": "⚠️ กรุณาเลือกหุ้นอย่างน้อย 2 ตัวขึ้นไปเพื่อคำนวณจัดพอร์ต",
+        "err_fetch": "❌ เกิดข้อผิดพลาด: ไม่สามารถดึงข้อมูลหุ้นได้ กรุณาตรวจสอบชื่อหุ้นหรือช่วงเวลาที่เลือกอีกครั้ง"
+    },
+    "English": {
+        "title": "📊 Mean-Variance Portfolio Optimization",
+        "subtitle": "Markowitz Model — Efficient Frontier Analysis",
+        "sidebar_header": "⚙️ Configuration",
+        "lang_label": "Language / เปลี่ยนภาษา",
+        "ticker_label": "Search or Select Tickers (e.g., AAPL, NVDA, PTT.BK)",
+        "ticker_help": "Type to search popular tickers or type a custom symbol and press Enter.",
+        "date_label": "Historical Date Range",
+        "rf_label": "Risk-Free Rate (%)",
+        "btn_run": "🚀 Run Optimization",
+        "tab_weights": "🍰 Asset Allocation Weights",
+        "tab_frontier": "📈 Efficient Frontier Curve",
+        "tab_summary": "📋 Performance Summary Table",
+        "metric_return": "Expected Annual Return",
+        "metric_risk": "Annual Volatility (Risk)",
+        "metric_sharpe": "Sharpe Ratio",
+        "max_sharpe": "Maximum Sharpe Ratio Portfolio",
+        "min_var": "Minimum Variance Portfolio",
+        "asset": "Asset Ticker",
+        "weight_pct": "Optimal Weight (%)",
+        "err_min": "⚠️ Please select at least 2 tickers for optimization.",
+        "err_fetch": "❌ Error fetching data. Please verify the tickers or date range."
+    }
+}
+
+# รายชื่อหุ้นยอดนิยมสำหรับระบบแนะนำ (Autocomplete Helper)
+POPULAR_TICKERS = [
+    "AAPL", "MSFT", "GOOG", "NVDA", "TSLA", "AMD", "META", "AMZN", "NFLX",
+    "PTT.BK", "CPALL.BK", "BDMS.BK", "SCC.BK", "AOT.BK", "KBANK.BK", "SCB.BK"
+]
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Sidebar Inputs
+# 2. ส่วนแสดงผลแถบข้าง (Sidebar)
 # ─────────────────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.header("⚙️ Configuration")
+    lang = st.selectbox("Language/ภาษา", ["ไทย", "English"])
+    T = LANG_DICT[lang] # ตัวแปรย่อสำหรับดึงข้อความภาษาที่เลือก
     
-    # Stock tickers input
-    tickers_input = st.text_input(
-        "Stock Tickers (comma-separated)",
-        value="AAPL, MSFT, GOOG, AMZN, META",
-        help="Enter stock symbols separated by commas (e.g., AAPL, MSFT or PTT.BK, BDMS.BK)"
+    st.markdown("---")
+    st.header(T["sidebar_header"])
+    
+    # ระบบค้นหาและแนะนำหุ้น (Autocomplete) รองรับการพิมพ์เพิ่มเอง
+    selected_tickers = st.multiselect(
+        T["ticker_label"],
+        options=list(set(POPULAR_TICKERS)),
+        default=["AAPL", "MSFT", "GOOG", "NVDA"],
+        help=T["ticker_help"]
     )
     
     st.markdown("---")
-    
-    # Date range selection
     col1, col2 = st.columns(2)
     with col1:
-        start_date = st.date_input(
-            "Start Date",
-            value=datetime.now() - timedelta(days=3*365),
-            max_value=datetime.now() - timedelta(days=30)
-        )
+        start_date = st.date_input(f"{T['date_label']} (Start)", datetime.today() - timedelta(days=5*365))
     with col2:
-        end_date = st.date_input(
-            "End Date",
-            value=datetime.now(),
-            max_value=datetime.now()
-        )
-    
-    st.markdown("---")
-    
-    # Risk-free rate
-    risk_free_rate = st.slider(
-        "Risk-Free Rate (%)",
-        min_value=0.0,
-        max_value=10.0,
-        value=2.0,
-        step=0.1,
-        help="Annual risk-free rate for Sharpe Ratio calculation"
-    ) / 100
-    
-    st.markdown("---")
-    
-    # Run optimization button
-    run_optimization = st.button("🚀 Run Optimization", type="primary", use_container_width=True)
-
+        end_date = st.date_input(f"{T['date_label']} (End)", datetime.today())
+        
+    rf_rate = st.number_input(T["rf_label"], min_value=0.0, max_value=20.0, value=2.0, step=0.1) / 100
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Helper Functions
+# 3. ส่วนคำนวณทางคณิตศาสตร์และการเงิน (Financial Engine)
 # ─────────────────────────────────────────────────────────────────────────────
+def get_portfolio_stats(weights, returns_mean, returns_cov, rf_rate):
+    port_return = np.sum(returns_mean * weights) * 252
+    port_vol = np.sqrt(np.dot(weights.T, np.dot(returns_cov * 252, weights)))
+    sharpe_ratio = (port_return - rf_rate) / port_vol
+    return port_return, port_vol, sharpe_ratio
 
-def parse_tickers(tickers_str: str) -> list[str]:
-    """Parse and clean ticker symbols from user input."""
-    tickers = [t.strip().upper() for t in tickers_str.split(",")]
-    return [t for t in tickers if t]  # Remove empty strings
+def minimize_sharpe(weights, returns_mean, returns_cov, rf_rate):
+    return -get_portfolio_stats(weights, returns_mean, returns_cov, rf_rate)[2]
 
-
-def fetch_price_data(tickers: list[str], start: datetime, end: datetime) -> pd.DataFrame:
-    """Fetch adjusted close prices from Yahoo Finance."""
-    data = yf.download(
-        tickers,
-        start=start,
-        end=end,
-        auto_adjust=True,
-        progress=False
-    )["Close"]
-    
-    # Handle single ticker case (returns Series)
-    if isinstance(data, pd.Series):
-        data = data.to_frame(name=tickers[0])
-    
-    return data
-
-
-def calculate_returns(prices: pd.DataFrame) -> pd.DataFrame:
-    """Calculate daily log returns."""
-    return np.log(prices / prices.shift(1)).dropna()
-
-
-def portfolio_performance(weights: np.ndarray, mean_returns: np.ndarray, 
-                          cov_matrix: np.ndarray, trading_days: int = 252) -> tuple:
-    """Calculate annualized return, volatility, and Sharpe ratio."""
-    portfolio_return = np.sum(mean_returns * weights) * trading_days
-    portfolio_volatility = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights))) * np.sqrt(trading_days)
-    return portfolio_return, portfolio_volatility
-
-
-def negative_sharpe_ratio(weights: np.ndarray, mean_returns: np.ndarray, 
-                          cov_matrix: np.ndarray, risk_free_rate: float) -> float:
-    """Negative Sharpe ratio for minimization."""
-    p_return, p_volatility = portfolio_performance(weights, mean_returns, cov_matrix)
-    return -(p_return - risk_free_rate) / p_volatility
-
-
-def portfolio_volatility(weights: np.ndarray, mean_returns: np.ndarray, 
-                         cov_matrix: np.ndarray) -> float:
-    """Portfolio volatility for minimum variance optimization."""
-    return portfolio_performance(weights, mean_returns, cov_matrix)[1]
-
-
-def optimize_portfolio(mean_returns: np.ndarray, cov_matrix: np.ndarray, 
-                       risk_free_rate: float, objective: str = "sharpe") -> np.ndarray:
-    """Optimize portfolio weights using scipy.optimize."""
-    num_assets = len(mean_returns)
-    initial_weights = np.array([1/num_assets] * num_assets)
-    
-    # Constraints: weights sum to 1
-    constraints = {"type": "eq", "fun": lambda w: np.sum(w) - 1}
-    
-    # Bounds: each weight between 0 and 1 (long only)
-    bounds = tuple((0, 1) for _ in range(num_assets))
-    
-    if objective == "sharpe":
-        result = minimize(
-            negative_sharpe_ratio,
-            initial_weights,
-            args=(mean_returns, cov_matrix, risk_free_rate),
-            method="SLSQP",
-            bounds=bounds,
-            constraints=constraints
-        )
-    else:  # minimum variance
-        result = minimize(
-            portfolio_volatility,
-            initial_weights,
-            args=(mean_returns, cov_matrix),
-            method="SLSQP",
-            bounds=bounds,
-            constraints=constraints
-        )
-    
-    return result.x
-
-
-def generate_efficient_frontier(mean_returns: np.ndarray, cov_matrix: np.ndarray, 
-                                num_portfolios: int = 100) -> tuple:
-    """Generate points along the efficient frontier."""
-    num_assets = len(mean_returns)
-    
-    # Find min and max returns on the frontier
-    min_var_weights = optimize_portfolio(mean_returns, cov_matrix, 0, "min_var")
-    min_return = portfolio_performance(min_var_weights, mean_returns, cov_matrix)[0]
-    
-    # Use individual asset max return as upper bound
-    max_return = np.max(mean_returns) * 252
-    
-    target_returns = np.linspace(min_return, max_return, num_portfolios)
-    frontier_volatilities = []
-    frontier_returns = []
-    
-    for target in target_returns:
-        constraints = [
-            {"type": "eq", "fun": lambda w: np.sum(w) - 1},
-            {"type": "eq", "fun": lambda w, t=target: portfolio_performance(w, mean_returns, cov_matrix)[0] - t}
-        ]
-        bounds = tuple((0, 1) for _ in range(num_assets))
-        initial_weights = np.array([1/num_assets] * num_assets)
-        
-        result = minimize(
-            portfolio_volatility,
-            initial_weights,
-            args=(mean_returns, cov_matrix),
-            method="SLSQP",
-            bounds=bounds,
-            constraints=constraints
-        )
-        
-        if result.success:
-            ret, vol = portfolio_performance(result.x, mean_returns, cov_matrix)
-            frontier_returns.append(ret)
-            frontier_volatilities.append(vol)
-    
-    return np.array(frontier_returns), np.array(frontier_volatilities)
-
+def minimize_variance(weights, returns_mean, returns_cov, rf_rate):
+    return get_portfolio_stats(weights, returns_mean, returns_cov, rf_rate)[1]**2
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Main Application Logic
+# 4. ส่วนหน้าจอหลักและการแสดงผล (Main UI Logic)
 # ─────────────────────────────────────────────────────────────────────────────
+st.title(T["title"])
+st.markdown(f"*{T['subtitle']}*")
 
-if run_optimization:
-    try:
-        # Parse tickers
-        tickers = parse_tickers(tickers_input)
-        
-        if len(tickers) < 2:
-            st.error("⚠️ Please enter at least 2 stock tickers for portfolio optimization.")
-            st.stop()
-        
-        # Validate date range
-        if start_date >= end_date:
-            st.error("⚠️ Start date must be before end date.")
-            st.stop()
-        
-        # Fetch data with progress indicator
-        with st.spinner(f"Fetching data for {len(tickers)} stocks..."):
-            prices = fetch_price_data(tickers, start_date, end_date)
-        
-        # Check for missing data
-        if prices.empty:
-            st.error("⚠️ No data retrieved. Please check ticker symbols and date range.")
-            st.stop()
-        
-        # Check for tickers with no data
-        missing_tickers = [t for t in tickers if t not in prices.columns]
-        if missing_tickers:
-            st.warning(f"⚠️ No data found for: {', '.join(missing_tickers)}. Proceeding with available tickers.")
-            tickers = [t for t in tickers if t in prices.columns]
-        
-        if len(tickers) < 2:
-            st.error("⚠️ Less than 2 valid tickers remaining. Cannot optimize.")
-            st.stop()
-        
-        # Handle missing values
-        prices = prices[tickers].dropna()
-        
-        if len(prices) < 30:
-            st.error("⚠️ Insufficient data points. Please select a longer date range.")
-            st.stop()
-        
-        # Calculate returns and statistics
-        returns = calculate_returns(prices)
-        mean_returns = returns.mean().values
-        cov_matrix = returns.cov().values
-        
-        # Optimize portfolios
-        with st.spinner("Optimizing portfolios..."):
-            max_sharpe_weights = optimize_portfolio(mean_returns, cov_matrix, risk_free_rate, "sharpe")
-            min_var_weights = optimize_portfolio(mean_returns, cov_matrix, risk_free_rate, "min_var")
-            
-            # Calculate portfolio metrics
-            ms_return, ms_volatility = portfolio_performance(max_sharpe_weights, mean_returns, cov_matrix)
-            ms_sharpe = (ms_return - risk_free_rate) / ms_volatility
-            
-            mv_return, mv_volatility = portfolio_performance(min_var_weights, mean_returns, cov_matrix)
-            mv_sharpe = (mv_return - risk_free_rate) / mv_volatility
-            
-            # Generate efficient frontier
-            frontier_returns, frontier_volatilities = generate_efficient_frontier(mean_returns, cov_matrix)
-        
-        st.success("✅ Optimization complete!")
-        st.markdown("---")
-        
-        # ─────────────────────────────────────────────────────────────────────
-        # Display Results
-        # ─────────────────────────────────────────────────────────────────────
-        
-        # Summary Metrics Table
-        st.subheader("📋 Portfolio Comparison")
-        
-        summary_df = pd.DataFrame({
-            "Metric": ["Expected Annual Return", "Annual Volatility (Risk)", "Sharpe Ratio"],
-            "Max Sharpe Ratio": [f"{ms_return:.2%}", f"{ms_volatility:.2%}", f"{ms_sharpe:.3f}"],
-            "Minimum Variance": [f"{mv_return:.2%}", f"{mv_volatility:.2%}", f"{mv_sharpe:.3f}"]
-        })
-        
-        st.dataframe(
-            summary_df,
-            use_container_width=True,
-            hide_index=True
-        )
-        
-        st.markdown("---")
-        
-        # Pie Charts for Portfolio Weights
-        st.subheader("🥧 Portfolio Allocation")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Max Sharpe Pie Chart
-            fig_pie_sharpe = go.Figure(data=[go.Pie(
-                labels=tickers,
-                values=max_sharpe_weights,
-                hole=0.4,
-                textinfo="label+percent",
-                textposition="outside",
-                marker=dict(colors=["#636EFA", "#EF553B", "#00CC96", "#AB63FA", "#FFA15A", 
-                                    "#19D3F3", "#FF6692", "#B6E880", "#FF97FF", "#FECB52"])
-            )])
-            fig_pie_sharpe.update_layout(
-                title=dict(text="Max Sharpe Ratio Portfolio", x=0.5, xanchor="center"),
-                showlegend=True,
-                height=400,
-                margin=dict(t=60, b=20, l=20, r=20)
-            )
-            st.plotly_chart(fig_pie_sharpe, use_container_width=True)
-        
-        with col2:
-            # Min Variance Pie Chart
-            fig_pie_minvar = go.Figure(data=[go.Pie(
-                labels=tickers,
-                values=min_var_weights,
-                hole=0.4,
-                textinfo="label+percent",
-                textposition="outside",
-                marker=dict(colors=["#636EFA", "#EF553B", "#00CC96", "#AB63FA", "#FFA15A",
-                                    "#19D3F3", "#FF6692", "#B6E880", "#FF97FF", "#FECB52"])
-            )])
-            fig_pie_minvar.update_layout(
-                title=dict(text="Minimum Variance Portfolio", x=0.5, xanchor="center"),
-                showlegend=True,
-                height=400,
-                margin=dict(t=60, b=20, l=20, r=20)
-            )
-            st.plotly_chart(fig_pie_minvar, use_container_width=True)
-        
-        st.markdown("---")
-        
-        # Efficient Frontier Chart
-        st.subheader("📈 Efficient Frontier")
-        
-        fig_frontier = go.Figure()
-        
-        # Plot efficient frontier line
-        fig_frontier.add_trace(go.Scatter(
-            x=frontier_volatilities * 100,
-            y=frontier_returns * 100,
-            mode="lines",
-            name="Efficient Frontier",
-            line=dict(color="#636EFA", width=3)
-        ))
-        
-        # Plot individual assets
-        individual_returns = mean_returns * 252
-        individual_volatilities = np.sqrt(np.diag(cov_matrix)) * np.sqrt(252)
-        
-        fig_frontier.add_trace(go.Scatter(
-            x=individual_volatilities * 100,
-            y=individual_returns * 100,
-            mode="markers+text",
-            name="Individual Assets",
-            text=tickers,
-            textposition="top center",
-            marker=dict(size=10, color="#B6E880", symbol="diamond")
-        ))
-        
-        # Mark Max Sharpe Portfolio
-        fig_frontier.add_trace(go.Scatter(
-            x=[ms_volatility * 100],
-            y=[ms_return * 100],
-            mode="markers",
-            name=f"Max Sharpe (SR={ms_sharpe:.2f})",
-            marker=dict(size=18, color="#EF553B", symbol="star", line=dict(width=2, color="white"))
-        ))
-        
-        # Mark Minimum Variance Portfolio
-        fig_frontier.add_trace(go.Scatter(
-            x=[mv_volatility * 100],
-            y=[mv_return * 100],
-            mode="markers",
-            name=f"Min Variance (SR={mv_sharpe:.2f})",
-            marker=dict(size=18, color="#00CC96", symbol="star", line=dict(width=2, color="white"))
-        ))
-        
-        fig_frontier.update_layout(
-            title=dict(text="Efficient Frontier with Optimal Portfolios", x=0.5, xanchor="center"),
-            xaxis_title="Annual Volatility (%)",
-            yaxis_title="Expected Annual Return (%)",
-            height=500,
-            showlegend=True,
-            legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
-            hovermode="closest"
-        )
-        
-        st.plotly_chart(fig_frontier, use_container_width=True)
-        
-        # ─────────────────────────────────────────────────────────────────────
-        # Detailed Weights Table
-        # ─────────────────────────────────────────────────────────────────────
-        st.markdown("---")
-        st.subheader("📊 Detailed Portfolio Weights")
-        
-        weights_df = pd.DataFrame({
-            "Ticker": tickers,
-            "Max Sharpe (%)": [f"{w*100:.2f}%" for w in max_sharpe_weights],
-            "Min Variance (%)": [f"{w*100:.2f}%" for w in min_var_weights]
-        })
-        
-        st.dataframe(weights_df, use_container_width=True, hide_index=True)
-        
-        # Data info
-        st.markdown("---")
-        st.caption(f"📅 Data period: {prices.index[0].strftime('%Y-%m-%d')} to {prices.index[-1].strftime('%Y-%m-%d')} ({len(prices)} trading days)")
+if st.sidebar.button(T["btn_run"]):
+    if len(selected_tickers) < 2:
+        st.error(T["err_min"])
+    else:
+        with st.spinner('Calculating...'):
+            try:
+                # จัดการข้อมูลนำเข้า: ตัดช่องว่างและแปลงเป็นตัวพิมพ์ใหญ่
+                tickers = [t.strip().upper() for t in selected_tickers]
+                
+                # ดึงราคาย้อนหลังจาก yfinance
+                df = yf.download(tickers, start=start_date, end=end_date)['Adj Close']
+                
+                if df.empty or (len(tickers) > 1 and df.shape[1] != len(tickers)):
+                    raise ValueError()
+                
+                # คำนวณผลตอบแทนและความแปรปรวนร่วม
+                returns = df.pct_change().dropna()
+                returns_mean = returns.mean()
+                returns_cov = returns.cov()
+                
+                num_assets = len(tickers)
+                constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
+                bounds = tuple((0, 1) for _ in range(num_assets))
+                init_guess = num_assets * [1. / num_assets]
+                
+                #คำนวณ พอร์ต Max Sharpe
+                opt_sharpe = minimize(minimize_sharpe, init_guess, args=(returns_mean, returns_cov, rf_rate), method='SLSQP', bounds=bounds, constraints=constraints)
+                w_sharpe = opt_sharpe['x']
+                ret_sh, vol_sh, sr_sh = get_portfolio_stats(w_sharpe, returns_mean, returns_cov, rf_rate)
+                
+                # คำนวณ พอร์ต Min Variance
+                opt_var = minimize(minimize_variance, init_guess, args=(returns_mean, returns_cov, rf_rate), method='SLSQP', bounds=bounds, constraints=constraints)
+                w_var = opt_var['x']
+                ret_v, vol_v, sr_v = get_portfolio_stats(w_var, returns_mean, returns_cov, rf_rate)
+                
+                # คำนวณเส้น Efficient Frontier Curve
+                target_returns = np.linspace(ret_v, returns_mean.max() * 252, 30)
+                frontier_vols = []
+                for target in target_returns:
+                    cons = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
+                            {'type': 'eq', 'fun': lambda x: get_portfolio_stats(x, returns_mean, returns_cov, rf_rate)[0] - target})
+                    res = minimize(minimize_variance, init_guess, args=(returns_mean, returns_cov, rf_rate), method='SLSQP', bounds=bounds, constraints=cons)
+                    frontier_vols.append(np.sqrt(res['fun']))
 
-    except Exception as e:
-        st.error(f"⚠️ An error occurred: {str(e)}")
-        st.info("Please check your inputs and try again. Common issues:\n"
-                "- Invalid ticker symbols\n"
-                "- Date range with no trading data\n"
-                "- Network connectivity issues")
+                # แสดงผลแบ่งเป็น 3 Tabs
+                tab1, tab2, tab3 = st.tabs([T["tab_weights"], T["tab_frontier"], T["tab_summary"]])
+                
+                with tab1: # กราฟวงกลมแสดงสัดส่วน
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        fig1 = go.Figure(data=[go.Pie(labels=tickers, values=w_sharpe, textinfo='percent+label')])
+                        fig1.update_layout(title=T["max_sharpe"], height=400)
+                        st.plotly_chart(fig1, use_container_width=True)
+                    with c2:
+                        fig2 = go.Figure(data=[go.Pie(labels=tickers, values=w_var, textinfo='percent+label')])
+                        fig2.update_layout(title=T["min_var"], height=400)
+                        st.plotly_chart(fig2, use_container_width=True)
+                        
+                with tab2: # กราฟ Efficient Frontier
+                    fig_ef = go.Figure()
+                    fig_ef.add_trace(go.Scatter(x=frontier_vols, y=target_returns, mode='lines', name='Efficient Frontier', line=dict(color='black', width=2)))
+                    for i, ticker in enumerate(tickers):
+                        stk_vol = np.sqrt(returns_cov.iloc[i, i] * 252)
+                        stk_ret = returns_mean.iloc[i] * 252
+                        fig_ef.add_trace(go.Scatter(x=[stk_vol], y=[stk_ret], mode='markers+text', name=ticker, text=[ticker], textposition="top center"))
+                    fig_ef.add_trace(go.Scatter(x=[vol_sh], y=[ret_sh], mode='markers', name=T["max_sharpe"], marker=dict(color='gold', size=14, symbol='star', line=dict(color='black', width=1))))
+                    fig_ef.add_trace(go.Scatter(x=[vol_v], y=[ret_v], mode='markers', name=T["min_var"], marker=dict(color='red', size=14, symbol='diamond', line=dict(color='black', width=1))))
+                    fig_ef.update_layout(xaxis_title=T["metric_risk"], yaxis_title=T["metric_return"], height=500)
+                    st.plotly_chart(fig_ef, use_container_width=True)
+                    
+                with tab3: # ตารางสรุปข้อมูลคำนวณ
+                    summary_df = pd.DataFrame({
+                        "Metric": [T["metric_return"], T["metric_risk"], T["metric_sharpe"]],
+                        T["max_sharpe"]: [f"{ret_sh*100:.2f}%", f"{vol_sh*100:.2f}%", f"{sr_sh:.2f}"],
+                        T["min_var"]: [f"{ret_v*100:.2f}%", f"{vol_v*100:.2f}%", f"{sr_v:.2f}"]
+                    })
+                    st.table(summary_df)
+                    
+                    st.subheader(T["tab_weights"])
+                    weights_df = pd.DataFrame({
+                        T["asset"]: tickers,
+                        T["max_sharpe"]: [f"{w*100:.2f}%" for w in w_sharpe],
+                        T["min_var"]: [f"{w*100:.2f}%" for w in w_var]
+                    })
+                    st.dataframe(weights_df, use_container_width=True)
 
-else:
-    # Initial state - show instructions
-    st.info("👈 Configure your portfolio parameters in the sidebar and click **Run Optimization** to begin.")
-    
-    with st.expander("ℹ️ How to Use This Tool"):
-        st.markdown("""
-        **Step 1:** Enter stock ticker symbols separated by commas
-        - US stocks: AAPL, MSFT, GOOG, AMZN
-        - Thai stocks: PTT.BK, BDMS.BK, AOT.BK
-        
-        **Step 2:** Select your date range for historical data
-        
-        **Step 3:** Adjust the risk-free rate (default 2%)
-        
-        **Step 4:** Click "Run Optimization"
-        
-        ---
-        
-        **Output includes:**
-        - **Max Sharpe Ratio Portfolio:** Highest risk-adjusted return
-        - **Minimum Variance Portfolio:** Lowest risk
-        - **Efficient Frontier:** Visual representation of optimal portfolios
-        """)
+            except Exception:
+                st.error(T["err_fetch"])
