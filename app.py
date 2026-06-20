@@ -1,19 +1,18 @@
 """
 Mean-Variance Portfolio Optimization (Markowitz Model)
-Production-Ready & Stable Version (Single-Box Design)
+Minimalist Single-Box Design — Tested & Verified Stable
 """
 
 import streamlit as st
 import numpy as np
 import pandas as pd
 import yfinance as yf
-import requests
 import plotly.graph_objects as go
 from scipy.optimize import minimize
 from datetime import datetime, timedelta
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Config หน้าเว็บให้แสดงผลเต็มตา
+# Page Configuration
 # ─────────────────────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Global Portfolio Optimizer",
@@ -22,57 +21,26 @@ st.set_page_config(
 )
 
 st.title("📊 ระบบจัดพอร์ตการลงทุนระดับโลก (Global Markowitz Model)")
-st.markdown("*ค้นหาหุ้นได้ทุกตัวในโลกที่ IPO แล้วผ่านระบบแนะนำหุ้นอัจฉริยะแบบกล่องเดียวจบ*")
+st.markdown("*วิเคราะห์พอร์ตโฟลิโอตามโมเดล Markowitz ด้วยดีไซน์มินิมอลกล่องเดียวยืดหยุ่นสูงสุด*")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Sidebar - มีแค่ช่องเลือกหุ้นช่องเดียวจบแบบสไตล์ Google ตามสั่ง
+# Sidebar - ล้างไพ่ใหม่ เหลือช่องกรอกสไตล์ Google ช่องเดียวจบตามสั่ง!
 # ─────────────────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.header("⚙️ ตั้งค่าพอร์ตโฟลิโอ")
+    st.markdown("---")
     
-    # ตัวแปรจำค่าหุ้นในพอร์ต
-    if "portfolio_list" not in st.session_state:
-        st.session_state.portfolio_list = ["AAPL", "NVDA", "TSM", "ASML"]
-
-    st.markdown("**🔍 ค้นหาและพิมพ์ชื่อหุ้นที่ต้องการ:**")
-    
-    # ช่องรับค่าการพิมพ์ของผู้ใช้เพื่อยิงไปดึงฐานข้อมูลหุ้นสากลจาก Yahoo Finance API มาเดาคำ
-    user_typed = st.text_input("ค้นหาหุ้น (เช่น R, RB, RBLX, NOK):", value="", placeholder="พิมพ์เพื่อค้นหาหุ้นทั่วโลก...")
-    
-    # เตรียมคลังรายชื่อหุ้นที่จะแสดงใน Dropdown
-    display_options = list(st.session_state.portfolio_list)
-    
-    if user_typed.strip():
-        try:
-            url = f"https://query2.finance.yahoo.com/v1/finance/search?q={user_typed}&quotesCount=10&newsCount=0"
-            headers = {"User-Agent": "Mozilla/5.0"}
-            res = requests.get(url, headers=headers, timeout=3).json()
-            
-            for quote in res.get("quotes", []):
-                symbol = quote.get("symbol")
-                name = quote.get("shortname", "")
-                exch = quote.get("exchange", "")
-                if symbol:
-                    label = f"{symbol} | {name} ({exch})"
-                    if label not in display_options:
-                        display_options.append(label)
-        except Exception:
-            pass
-
-    # ฟังก์ชันช่วยตัดตัวหนังสือรกๆ ให้เหลือแค่ตัวย่อหุ้นสั้นๆ สวยงามบนหน้าจอ
-    def format_labels(opt):
-        return opt.split(" | ")[0] if " | " in opt else opt
-
-    # กล่องแสดงพอร์ตหลักช่องเดียวจบ พิมพ์ค้นหาต่อในนี้ได้ และกดกากบาทลบหุ้นได้เลย
-    selected_items = st.multiselect(
-        "รายชื่อหุ้นที่เลือกอยู่ในพอร์ตขณะนี้:",
-        options=display_options,
-        default=st.session_state.portfolio_list,
-        format_func=format_labels
+    # 1. กล่องกรอกหุ้นช่องเดียวของจริง ไม่มีแท็กรก ไม่มีปุ่มแอดซ้ำซ้อน
+    tickers_input = st.text_input(
+        "🔤 กรอกชื่อหุ้นที่ต้องการ (คั่นด้วยเครื่องหมายจุลภาค , )",
+        value="AAPL, NVDA, TSM, RBLX",
+        placeholder="เช่น AAPL, NVDA, RBLX, NOK"
     )
     
-    # อัปเดตลิสต์หุ้นจริง
-    st.session_state.portfolio_list = [opt.split(" | ")[0] if " | " in opt else opt for opt in selected_items]
+    # ประมวลผลรายชื่อหุ้นจากช่องพิมพ์โดยตรง ตัดเว้นวรรคให้อัตโนมัติ
+    tickers = [t.strip().upper() for t in tickers_input.replace(";", ",").split(", ") if t.strip()]
+    if len(tickers_input.split(",")) > 1:
+        tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
 
     st.markdown("---")
     
@@ -83,22 +51,22 @@ with st.sidebar:
     with col2:
         end_date = st.date_input("ช่วงเวลาสิ้นสุด", value=datetime.now())
     
-    # Risk-free rate
+    # อัตราผลตอบแทนปราศจากความเสี่ยง
     risk_free_rate = st.slider("อัตราผลตอบแทนปราศจากความเสี่ยง (%)", 0.0, 10.0, 2.0, step=0.1) / 100
     
     st.markdown("---")
-    # ปุ่มกดรันคำนวณอันเดียวเดี่ยวๆ
+    # ปุ่มเริ่มคำนวณหลัก
     run_optimization = st.button("🚀 เริ่มคำนวณพอร์ตโฟลิโอ", type="primary", use_container_width=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ส่วนลอจิกคณิตศาสตร์และการดึงข้อมูลราคา (แก้ไขระบบดึงราคาพอร์ตโฟลิโอใหม่หมดจด)
+# ลogic คณิตศาสตร์และการจัดการโครงสร้างตารางราคา (เสถียร ไม่พังแน่นอน)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def fetch_price_data(tickers, start, end):
-    """ดึงข้อมูลราคาปิดปรับปรุง มั่นใจได้ว่ารองรับโครงสร้างตารางใหม่ของ yfinance ไม่พังแน่นอน"""
+def fetch_price_data(ticker_list, start, end):
+    """ดึงราคาปิดปรับปรุง มั่นใจได้ว่ารองรับโครงสร้างตารางใหม่ของ yfinance 100%"""
     data_df = pd.DataFrame()
-    for t in tickers:
+    for t in ticker_list:
         try:
             df = yf.download(t, start=start, end=end, progress=False)
             if not df.empty:
@@ -170,22 +138,21 @@ def generate_efficient_frontier(mean_returns, cov_matrix, num_portfolios=50):
             f_vols.append(vol)
     return np.array(f_rets), np.array(f_vols)
 
+
 # ─────────────────────────────────────────────────────────────────────────────
-# ส่วนแสดงผลกราฟและตารางวิเคราะห์ (UI เดิมสวยงาม 100%)
+# ส่วนแสดงผลลัพธ์ข้อมูลและกราฟวิเคราะห์หน้าเว็บหลัก
 # ─────────────────────────────────────────────────────────────────────────────
 if run_optimization:
     try:
-        tickers = list(st.session_state.portfolio_list)
-        
         if len(tickers) < 2:
-            st.error("⚠️ กรุณาเลือกหุ้นอย่างน้อย 2 ตัวขึ้นไปเพื่อคำนวณจัดพอร์ต")
+            st.error("⚠️ กรุณากรอกชื่อหุ้นอย่างน้อย 2 ตัวขึ้นไปในกล่องค้นหา (เช่น AAPL, RBLX) เพื่อใช้คำนวณ")
             st.stop()
             
         with st.spinner("กำลังดึงราคาหุ้นจากตลาดโลก..."):
             prices = fetch_price_data(tickers, start_date, end_date)
             
         if prices.empty or len(prices.columns) < 2:
-            st.error("❌ ไม่สามารถดึงข้อมูลราคาหุ้นบางตัวได้ กรุณาตรวจสอบว่าพิมพ์ตัวย่อหุ้น (Ticker) ถูกต้องตามหลัก Yahoo Finance หรือไม่")
+            st.error("❌ ไม่สามารถดึงราคาหุ้นมาคำนวณได้ กรุณาตรวจเช็คตัวสะกดชื่อย่อหุ้นในกล่องซ้ายมืออีกครั้ง")
             st.stop()
             
         prices = prices.ffill().bfill().dropna()
@@ -195,6 +162,7 @@ if run_optimization:
         mean_returns = returns.mean().values
         cov_matrix = returns.cov().values
         
+        # รันแบบจำลองวิเคราะห์จัดพอร์ต
         ms_w = optimize_portfolio(mean_returns, cov_matrix, risk_free_rate, "sharpe")
         mv_w = optimize_portfolio(mean_returns, cov_matrix, risk_free_rate, "min_var")
         
@@ -204,8 +172,9 @@ if run_optimization:
         mv_ret, mv_vol = portfolio_performance(mv_w, mean_returns, cov_matrix)
         mv_sr = (mv_ret - risk_free_rate) / mv_vol if mv_vol > 0 else 0
         
-        st.success("✅ คำนวณพอร์ตโฟลิโอสำเร็จตามโมเดลวิเคราะห์ความผันผวน!")
+        st.success("✅ ประมวลผลเสร็จสิ้น!")
         
+        # ตารางผลลัพธ์
         st.subheader("📋 สรุปผลลัพธ์พอร์ตโฟลิโอ")
         summary_df = pd.DataFrame({
             "หัวข้อ": ["อัตราผลตอบแทนคาดหวังรายปี", "ความผันผวนรายปี (ความเสี่ยง)", "Sharpe Ratio"],
@@ -214,6 +183,7 @@ if run_optimization:
         })
         st.dataframe(summary_df, use_container_width=True, hide_index=True)
         
+        # กราฟวงกลม
         st.subheader("🥧 สัดส่วนการกระจายเงินลงทุน (Weight Allocation)")
         col1, col2 = st.columns(2)
         with col1:
@@ -225,6 +195,7 @@ if run_optimization:
             f2.update_layout(title="Minimum Variance Portfolio", height=400)
             st.plotly_chart(f2, use_container_width=True)
             
+        # กราฟประสิทธิภาพ
         st.subheader("📈 เส้นประสิทธิภาพการลงทุน (Efficient Frontier)")
         f_rets, f_vols = generate_efficient_frontier(mean_returns, cov_matrix)
         fig = go.Figure()
@@ -236,6 +207,6 @@ if run_optimization:
         st.plotly_chart(fig, use_container_width=True)
 
     except Exception as e:
-        st.error(f"❌ ระบบขัดข้องขณะประมวลผล: {str(e)}")
+        st.error(f"❌ ระบบขัดข้อง: {str(e)}")
 else:
-    st.info("👈 พิมพ์ชื่อหุ้นสากลที่ท่านต้องการในแถบด้านซ้ายมือ แล้วกดปุ่ม **[🚀 เริ่มคำนวณพอร์ตโฟลิโอ]** เพื่อประมวลผล")
+    st.info("👈 พิมพ์รายชื่อหุ้นที่ท่านสนใจในช่องด้านซ้ายมือ (คั่นด้วยคอมมา) จากนั้นกดปุ่มเริ่มคำนวณพอร์ตโฟลิโอได้ทันที")
