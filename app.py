@@ -32,34 +32,33 @@ st.markdown("*Markowitz Model — Efficient Frontier Analysis*")
 with st.sidebar:
     st.header("⚙️ Configuration")
     
-    # [ระบบคำแนะนำหุ้นยอดนิยม] 👈 เพิ่มตรงนี้เพื่อให้พี่เลือกง่ายขึ้น
-    st.markdown("**💡 Quick Add Stock Recommendations**")
-    suggestions = ["-- Select to add --", "RKLB", "AAPL", "NVDA", "TSM", "ASML", "MSFT", "GOOG", "AMZN", "META", "PTT.BK", "CPALL.BK"]
-    selected_suggestion = st.selectbox("Choose a popular stock to add to your list:", options=suggestions)
-    
-    # จัดการต่อคำอัตโนมัติเมื่อกดเลือกจากคำแนะนำ
-    if "ticker_string" not in st.session_state:
-        st.session_state.ticker_string = "AAPL, MSFT, GOOG, AMZN, RKLB"
+    # คลังฐานข้อมูลคำแนะนำสำหรับให้ระบบ Autocomplete ไกด์คำให้พี่เลือกง่ายๆ
+    if "popular_pool" not in st.session_state:
+        st.session_state.popular_pool = ["AAPL", "MSFT", "GOOG", "AMZN", "META", "NVDA", "TSM", "ASML", "RKLB", "PTT.BK", "CPALL.BK"]
         
-    if selected_suggestion != "-- Select to add --":
-        current_tickers = [t.strip() for t in st.session_state.ticker_string.split(",") if t.strip()]
-        if selected_suggestion.upper() not in [x.upper() for x in current_tickers]:
-            current_tickers.append(selected_suggestion)
-            st.session_state.ticker_string = ", ".join(current_tickers)
-        # รีเซ็ตค่าตัวเลือกกลับเป็นค่าเริ่มต้นเพื่อให้กดเลือกตัวอื่นซ้ำได้
-        st.rerun()
+    if "current_selected" not in st.session_state:
+        st.session_state.current_selected = ["AAPL", "MSFT", "GOOG", "AMZN", "RKLB"]
 
-    # Stock tickers input - รักษาหน้าตาและโครงสร้างเดิมของพี่ไว้ 100%
-    tickers_input = st.text_input(
-        "Stock Tickers (comma-separated)",
-        value=st.session_state.ticker_string,
-        key="main_tickers_input",
-        help="Enter stock symbols separated by commas (e.g., AAPL, MSFT or PTT.BK, BDMS.BK)"
+    # ช่องกรอกช่องเดียวตามที่พี่ขอ: แสดงคำแนะนำหุ้นให้เลือก และ ยอมให้พิมพ์หุ้นกากๆ นอกลิสต์ได้อิสระ
+    selected_tickers = st.multiselect(
+        "Stock Tickers",
+        options=st.session_state.popular_pool,
+        default=st.session_state.current_selected,
+        help="Type or select stock symbols. You can type new symbols (like RKLB or others) and press Enter to add them."
     )
     
-    # อัปเดตค่ากลับเข้า session_state เผื่อผู้ใช้พิมพ์แก้ไขเองในกล่อง
-    st.session_state.ticker_string = tickers_input
-    
+    # กลไกลับหลังบ้าน: ถ้าพี่พิมพ์หุ้นแปลกๆ นอกเหนือคลังคำแนะนำ แล้วกด Enter 
+    # ระบบจะแอบนำคำนั้นไปเซฟลงคลังแนะนำเงียบๆ เพื่อไม่ให้ Streamlit บล็อกคำขัดขวางพี่อีกต่อไป
+    has_new_ticker = False
+    for ticker in selected_tickers:
+        if ticker not in st.session_state.popular_pool:
+            st.session_state.popular_pool.append(ticker)
+            has_new_ticker = True
+            
+    if has_new_ticker:
+        st.session_state.current_selected = selected_tickers
+        st.rerun() # รีรันหน้าจอ 1 ครั้งเพื่อเคลียร์สถานะให้กล่องแสดงผลแท็กหุ้นใหม่ได้อย่างถูกต้อง
+
     st.markdown("---")
     
     # Date range selection
@@ -98,12 +97,6 @@ with st.sidebar:
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper Functions
 # ─────────────────────────────────────────────────────────────────────────────
-
-def parse_tickers(tickers_str: str) -> list[str]:
-    """Parse and clean ticker symbols from user input."""
-    tickers = [t.strip().upper() for t in tickers_str.split(",")]
-    return [t for t in tickers if t]  # Remove empty strings
-
 
 def fetch_price_data(tickers: list[str], start: datetime, end: datetime) -> pd.DataFrame:
     """Fetch adjusted close prices from Yahoo Finance safely for ALL global stocks."""
@@ -232,7 +225,8 @@ def generate_efficient_frontier(mean_returns: np.ndarray, cov_matrix: np.ndarray
 
 if run_optimization:
     try:
-        tickers = parse_tickers(tickers_input)
+        # สกัดรายชื่อหุ้นมาใช้งานโดยตรงจากตัวกล่องข้อความเดี่ยว
+        tickers = [t.strip().upper() for t in selected_tickers if t.strip()]
         
         if len(tickers) < 2:
             st.error("⚠️ Please enter at least 2 stock tickers for portfolio optimization.")
