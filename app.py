@@ -1,45 +1,38 @@
 import streamlit as st
 import yfinance as yf
-import requests
-from streamlit_searchbox import st_searchbox
+import pandas as pd
+import numpy as np
+from scipy.optimize import minimize
+import plotly.graph_objects as go
+from datetime import datetime, timedelta
 
-# ฟังก์ชันดึงรายชื่อหุ้นจาก Yahoo แบบกูเกิ้ล
-def search_stocks(search_term):
-    if not search_term: return []
-    url = f"https://query2.finance.yahoo.com/v1/finance/search?q={search_term}&quotesCount=10"
-    try:
-        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}).json()
-        return [f"{q['symbol']} - {q.get('shortname', '')}" for q in res.get('quotes', [])]
-    except:
-        return []
-
+st.set_page_config(page_title="Portfolio Optimizer", layout="wide")
 st.title("📊 Portfolio Optimizer")
 
-# กล่องค้นหาแบบ Google-style
-selected_stock = st_searchbox(
-    search_stocks,
-    placeholder="🔍 พิมพ์ชื่อหุ้น เช่น RBLX, NVDA...",
-    key="searchbox"
-)
+# 1. ช่องรับข้อมูลหุ้นแบบพิมพ์เอง (คลีนที่สุด)
+ticker_input = st.text_input("พิมพ์ชื่อหุ้น (คั่นด้วยคอมม่า):", "RBLX, NVDA, AMD")
+run_btn = st.button("🚀 คำนวณพอร์ตโฟลิโอ")
 
-# เก็บหุ้นที่เลือกไว้ใน Session
-if "my_portfolio" not in st.session_state:
-    st.session_state.my_portfolio = []
-
-if selected_stock:
-    symbol = selected_stock.split(" - ")[0]
-    if symbol not in st.session_state.my_portfolio:
-        st.session_state.my_portfolio.append(symbol)
-
-# แสดงรายชื่อหุ้นแบบสะอาดๆ ไม่รก
-st.write("### 💼 หุ้นในพอร์ตของท่าน:")
-cols = st.columns(4)
-for i, ticker in enumerate(st.session_state.my_portfolio):
-    if cols[i % 4].button(f"❌ {ticker}"):
-        st.session_state.my_portfolio.remove(ticker)
-        st.rerun()
-
-# ปุ่มคำนวณ (เอาไว้ด้านล่างสุด)
-if st.button("🚀 คำนวณพอร์ตโฟลิโอ"):
-    st.write("กำลังรันโมเดล...")
-    # (โค้ดคำนวณ Markowitz ของพี่ใส่ตรงนี้ต่อได้เลยครับ)
+if run_btn:
+    tickers = [t.strip().upper() for t in ticker_input.split(",")]
+    
+    with st.spinner("กำลังดึงข้อมูล..."):
+        # ใช้แค่ yf.download แบบธรรมดาที่สุดเพื่อลดโอกาสค้าง
+        data = yf.download(tickers, period="2y")['Adj Close']
+        
+    if data.empty:
+        st.error("ไม่พบข้อมูลหุ้น กรุณาตรวจสอบชื่อหุ้น")
+    else:
+        # คำนวณเบื้องต้น
+        returns = data.pct_change().dropna()
+        mean_returns = returns.mean()
+        cov_matrix = returns.cov()
+        
+        # แสดงผลลัพธ์
+        st.success("คำนวณเสร็จแล้ว!")
+        st.write("ผลตอบแทนรายวันเฉลี่ย:", mean_returns)
+        
+        # ตัวอย่างกราฟแบบเรียบง่าย
+        fig = go.Figure(data=[go.Bar(x=mean_returns.index, y=mean_returns.values)])
+        fig.update_layout(title="ผลตอบแทนเฉลี่ย")
+        st.plotly_chart(fig)
