@@ -9,7 +9,7 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import yfinance as yf
-import requests  # เพิ่มสำหรับดึงข้อมูล Autocomplete จาก Yahoo Finance API
+import requests
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from scipy.optimize import minimize
@@ -33,58 +33,57 @@ st.markdown("*Markowitz Model — Efficient Frontier Analysis*")
 with st.sidebar:
     st.header("⚙️ Configuration")
     
-    # ระบบค้นหาคำใกล้เคียง Real-time จากฐานข้อมูล Yahoo Finance ทั่วโลก
-    st.markdown("**🔍 Search Global Stocks**")
-    search_query = st.text_input("Type stock name or ticker to search:", value="", placeholder="e.g. N, NV, NOK, RKLB")
+    # 1. รักษารายชื่อหุ้นในพอร์ตปัจจุบันไว้ในหน่วยความจำ
+    if "current_portfolio" not in st.session_state:
+        st.session_state.current_portfolio = ["AAPL", "MSFT", "GOOG", "AMZN", "RKLB"]
+        
+    # 2. ตัวแปรเก็บค่าที่เรากำลังพิมพ์ในกล่องค้นหา เพื่อใช้ดึงข้อมูลจาก Yahoo Finance API
+    if "search_input_value" not in st.session_state:
+        st.session_state.search_input_value = ""
+
+    st.markdown("**🔍 Search & Manage Tickers**")
     
-    # คลังเก็บคำแนะนำแบบไดนามิก (เปลี่ยนไปตามสิ่งที่ผู้ใช้พิมพ์)
-    dynamic_options = []
+    # ช่องพิมพ์ช่องเดียวที่เป็นทั้งที่แสดงผลพอร์ต และเป็นช่องค้นหาอัจฉริยะในตัว
+    # ดึงข้อมูลจากคำที่ผู้ใช้พิมพ์แบบ Real-time ยิงไปถาม Yahoo Finance
+    query = st.text_input("Type to find asset (e.g., R, RB, RBLX, NOK):", value="", key="ticker_search_box")
     
-    if search_query.strip():
+    # สร้างรายการตัวเลือก (Dropdown Options) ยืดหยุ่นตามตัวอักษรที่พิมพ์เข้าไป
+    options_pool = list(st.session_state.current_portfolio)
+    
+    if query.strip():
         try:
-            # ยิง API ไปถาม Yahoo Finance ตรงๆ ว่าคำที่พี่พิมพ์มา มีหุ้นอะไรในโลกบ้างที่ใกล้เคียง
-            url = f"https://query2.finance.yahoo.com/v1/finance/search?q={search_query}&quotesCount=10&newsCount=0"
+            # ดึงรายชื่อหุ้นสากลทุกตัวที่ IPO แล้วและตรงกับคำที่พี่พิมพ์จากระบบ Yahoo Finance API
+            url = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}&quotesCount=15&newsCount=0"
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
             response = requests.get(url, headers=headers, timeout=5).json()
             
-            # สกัดเอาชื่อหุ้นทั้งหมดที่ค้นเจอมาทำเป็นคำแนะนำย้อยลงมา
             for quote in response.get("quotes", []):
                 symbol = quote.get("symbol")
                 shortname = quote.get("shortname", "")
                 exch = quote.get("exchange", "")
                 if symbol:
-                    dynamic_options.append(f"{symbol} ({shortname} - {exch})")
+                    display_text = f"{symbol} ({shortname} - {exch})"
+                    if display_text not in options_pool:
+                        options_pool.append(display_text)
         except Exception:
             pass
 
-    # ระบบจำหุ้นที่เลือกในเซสชัน เพื่อรักษาหน้าตาแบบกล่องเดียวของพี่ไว้
-    if "selected_portfolio_tickers" not in st.session_state:
-        st.session_state.selected_portfolio_tickers = ["AAPL", "MSFT", "GOOG", "AMZN", "RKLB"]
+    # ฟังก์ชันช่วยแปลงข้อมูลกลับเป็นตัวย่อหุ้นสั้นๆ
+    def clean_display_labels(opt):
+        return opt.split(" ")[0] if " (" in opt else opt
 
-    # แนะนำรายการที่พี่ค้นหาเจอเพื่อให้คลิกเลือกเพิ่มเข้าไป
-    if dynamic_options:
-        st.markdown("**💡 Matching Results (Click to add):**")
-        chosen_search = st.selectbox("Select stock to add to portfolio:", ["-- Click to choose --"] + dynamic_options, index=0)
-        if chosen_search != "-- Click to choose --":
-            target_symbol = chosen_search.split(" ")[0].strip().upper()
-            if target_symbol not in st.session_state.selected_portfolio_tickers:
-                st.session_state.selected_portfolio_tickers.append(target_symbol)
-            st.rerun()
-
-    st.markdown("---")
-    st.markdown("**🍰 Current Portfolio Assets**")
-    
-    # กล่องหลักเดี่ยวแสดงผลและจัดการหุ้นในพอร์ต (UI เหมือนเดิม คล่องตัวเหมือนเดิม ลบออกได้อิสระ)
-    # คราวนี้บรรจุหุ้นอะไรบนโลกก็ได้แล้วครับ ไม่ติดขัดคลังคำแนะนำล็อกตายอีกต่อไป
-    selected_tickers = st.multiselect(
-        "Stock Tickers",
-        options=st.session_state.selected_portfolio_tickers,
-        default=st.session_state.selected_portfolio_tickers,
-        help="This box shows your active portfolio. Use the search tool above to find and add any global asset."
+    # กล่องเลือกหุ้นอันเดียวจบ: แสดงตัวเลือกที่แคบลงเรื่อยๆ ตามที่พี่พิมพ์ และแสดงหุ้นเดิมที่มีอยู่แล้วด้วย
+    selected_options = st.multiselect(
+        "Active Portfolio Assets:",
+        options=options_pool,
+        default=st.session_state.current_portfolio,
+        format_func=clean_display_labels,
+        help="Type symbols above to search. Selected items will stay in your active portfolio below."
     )
     
-    # อัปเดตลิสต์หุ้นให้ตรงกับการกดลบออกของผู้ใช้
-    st.session_state.selected_portfolio_tickers = selected_tickers
+    # อัปเดตรายชื่อหุ้นในพอร์ตกลับเข้าเซสชัน เพื่อนำไปคำนวณกราฟ
+    cleaned_tickers = [opt.split(" ")[0] if " (" in opt else opt for opt in selected_options]
+    st.session_state.current_portfolio = cleaned_tickers
 
     st.markdown("---")
     
@@ -122,7 +121,7 @@ with st.sidebar:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Helper Functions (คงลอจิกคณิตศาสตร์และการดึงราคาอันแข็งแกร่งเดิมไว้ 100%)
+# Helper Functions (รักษาความถูกต้องแม่นยำทางคณิตศาสตร์เดิมไว้ 100%)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fetch_price_data(tickers: list[str], start: datetime, end: datetime) -> pd.DataFrame:
@@ -247,12 +246,12 @@ def generate_efficient_frontier(mean_returns: np.ndarray, cov_matrix: np.ndarray
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Main Application Logic (UI ตารางและกราฟวงกลม + กราฟโค้ง คงเดิม 100%)
+# Main Application Logic (UI ทุกอย่างเหมือนเวอร์ชันเดิมที่พี่ถูกใจ 100%)
 # ─────────────────────────────────────────────────────────────────────────────
 
 if run_optimization:
     try:
-        tickers = [t.strip().upper() for t in selected_tickers if t.strip()]
+        tickers = list(st.session_state.current_portfolio)
         
         if len(tickers) < 2:
             st.error("⚠️ Please enter at least 2 stock tickers for portfolio optimization.")
