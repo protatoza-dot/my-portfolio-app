@@ -9,6 +9,7 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import yfinance as yf
+import requests  # เพิ่มสำหรับดึงข้อมูล Autocomplete จาก Yahoo Finance API
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from scipy.optimize import minimize
@@ -32,32 +33,58 @@ st.markdown("*Markowitz Model — Efficient Frontier Analysis*")
 with st.sidebar:
     st.header("⚙️ Configuration")
     
-    # คลังฐานข้อมูลคำแนะนำสำหรับให้ระบบ Autocomplete ไกด์คำให้พี่เลือกง่ายๆ
-    if "popular_pool" not in st.session_state:
-        st.session_state.popular_pool = ["AAPL", "MSFT", "GOOG", "AMZN", "META", "NVDA", "TSM", "ASML", "RKLB", "PTT.BK", "CPALL.BK"]
-        
-    if "current_selected" not in st.session_state:
-        st.session_state.current_selected = ["AAPL", "MSFT", "GOOG", "AMZN", "RKLB"]
+    # ระบบค้นหาคำใกล้เคียง Real-time จากฐานข้อมูล Yahoo Finance ทั่วโลก
+    st.markdown("**🔍 Search Global Stocks**")
+    search_query = st.text_input("Type stock name or ticker to search:", value="", placeholder="e.g. N, NV, NOK, RKLB")
+    
+    # คลังเก็บคำแนะนำแบบไดนามิก (เปลี่ยนไปตามสิ่งที่ผู้ใช้พิมพ์)
+    dynamic_options = []
+    
+    if search_query.strip():
+        try:
+            # ยิง API ไปถาม Yahoo Finance ตรงๆ ว่าคำที่พี่พิมพ์มา มีหุ้นอะไรในโลกบ้างที่ใกล้เคียง
+            url = f"https://query2.finance.yahoo.com/v1/finance/search?q={search_query}&quotesCount=10&newsCount=0"
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+            response = requests.get(url, headers=headers, timeout=5).json()
+            
+            # สกัดเอาชื่อหุ้นทั้งหมดที่ค้นเจอมาทำเป็นคำแนะนำย้อยลงมา
+            for quote in response.get("quotes", []):
+                symbol = quote.get("symbol")
+                shortname = quote.get("shortname", "")
+                exch = quote.get("exchange", "")
+                if symbol:
+                    dynamic_options.append(f"{symbol} ({shortname} - {exch})")
+        except Exception:
+            pass
 
-    # ช่องกรอกช่องเดียวตามที่พี่ขอ: แสดงคำแนะนำหุ้นให้เลือก และ ยอมให้พิมพ์หุ้นกากๆ นอกลิสต์ได้อิสระ
+    # ระบบจำหุ้นที่เลือกในเซสชัน เพื่อรักษาหน้าตาแบบกล่องเดียวของพี่ไว้
+    if "selected_portfolio_tickers" not in st.session_state:
+        st.session_state.selected_portfolio_tickers = ["AAPL", "MSFT", "GOOG", "AMZN", "RKLB"]
+
+    # แนะนำรายการที่พี่ค้นหาเจอเพื่อให้คลิกเลือกเพิ่มเข้าไป
+    if dynamic_options:
+        st.markdown("**💡 Matching Results (Click to add):**")
+        chosen_search = st.selectbox("Select stock to add to portfolio:", ["-- Click to choose --"] + dynamic_options, index=0)
+        if chosen_search != "-- Click to choose --":
+            target_symbol = chosen_search.split(" ")[0].strip().upper()
+            if target_symbol not in st.session_state.selected_portfolio_tickers:
+                st.session_state.selected_portfolio_tickers.append(target_symbol)
+            st.rerun()
+
+    st.markdown("---")
+    st.markdown("**🍰 Current Portfolio Assets**")
+    
+    # กล่องหลักเดี่ยวแสดงผลและจัดการหุ้นในพอร์ต (UI เหมือนเดิม คล่องตัวเหมือนเดิม ลบออกได้อิสระ)
+    # คราวนี้บรรจุหุ้นอะไรบนโลกก็ได้แล้วครับ ไม่ติดขัดคลังคำแนะนำล็อกตายอีกต่อไป
     selected_tickers = st.multiselect(
         "Stock Tickers",
-        options=st.session_state.popular_pool,
-        default=st.session_state.current_selected,
-        help="Type or select stock symbols. You can type new symbols (like RKLB or others) and press Enter to add them."
+        options=st.session_state.selected_portfolio_tickers,
+        default=st.session_state.selected_portfolio_tickers,
+        help="This box shows your active portfolio. Use the search tool above to find and add any global asset."
     )
     
-    # กลไกลับหลังบ้าน: ถ้าพี่พิมพ์หุ้นแปลกๆ นอกเหนือคลังคำแนะนำ แล้วกด Enter 
-    # ระบบจะแอบนำคำนั้นไปเซฟลงคลังแนะนำเงียบๆ เพื่อไม่ให้ Streamlit บล็อกคำขัดขวางพี่อีกต่อไป
-    has_new_ticker = False
-    for ticker in selected_tickers:
-        if ticker not in st.session_state.popular_pool:
-            st.session_state.popular_pool.append(ticker)
-            has_new_ticker = True
-            
-    if has_new_ticker:
-        st.session_state.current_selected = selected_tickers
-        st.rerun() # รีรันหน้าจอ 1 ครั้งเพื่อเคลียร์สถานะให้กล่องแสดงผลแท็กหุ้นใหม่ได้อย่างถูกต้อง
+    # อัปเดตลิสต์หุ้นให้ตรงกับการกดลบออกของผู้ใช้
+    st.session_state.selected_portfolio_tickers = selected_tickers
 
     st.markdown("---")
     
@@ -95,7 +122,7 @@ with st.sidebar:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Helper Functions
+# Helper Functions (คงลอจิกคณิตศาสตร์และการดึงราคาอันแข็งแกร่งเดิมไว้ 100%)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fetch_price_data(tickers: list[str], start: datetime, end: datetime) -> pd.DataFrame:
@@ -220,12 +247,11 @@ def generate_efficient_frontier(mean_returns: np.ndarray, cov_matrix: np.ndarray
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Main Application Logic
+# Main Application Logic (UI ตารางและกราฟวงกลม + กราฟโค้ง คงเดิม 100%)
 # ─────────────────────────────────────────────────────────────────────────────
 
 if run_optimization:
     try:
-        # สกัดรายชื่อหุ้นมาใช้งานโดยตรงจากตัวกล่องข้อความเดี่ยว
         tickers = [t.strip().upper() for t in selected_tickers if t.strip()]
         
         if len(tickers) < 2:
